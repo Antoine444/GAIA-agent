@@ -11,7 +11,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.tools import tool
 from langchain.tools.retriever import create_retriever_tool
 from langchain_community.vectorstores import Pinecone
-import pinecone
+from langchain_pinecone import PineconeVectorStore
 
 
 load_dotenv()
@@ -98,7 +98,11 @@ try:
             )
         )
 
-    vector_store = Pinecone.from_existing_index(index_name, hf_embeddings)
+    vector_store = PineconeVectorStore(
+        index_name=index_name,
+        embedding=hf_embeddings,
+        pinecone_api_key=pinecone_api_key
+    )
 except Exception as e:
     raise RuntimeError(f"Failed to initialize Pinecone index: {e}")
 

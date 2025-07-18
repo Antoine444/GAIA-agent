@@ -5,10 +5,12 @@ langchain-community
 langchain-core
 langchain-google-genai
 langchain-huggingface
+langchain-pinecone
 langgraph
 huggingface_hub
 sentence-transformers
 pinecone
+pinecone-client
 pymupdf
 wikipedia
 pgvector
