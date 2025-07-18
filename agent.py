@@ -4,6 +4,7 @@ from langgraph.graph import START, StateGraph, MessagesState
 from langgraph.prebuilt import tools_condition
 from langgraph.prebuilt import ToolNode
 from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint, HuggingFaceEmbeddings
+from langchain_groq import ChatGroq
 from langchain_community.tools.ddg_search.tool import DuckDuckGoSearchResults
 from langchain_community.document_loaders import WikipediaLoader
 from langchain_community.document_loaders import ArxivLoader
@@ -12,99 +13,135 @@ from langchain_core.tools import tool
 from langchain.tools.retriever import create_retriever_tool
 from langchain_community.vectorstores import Pinecone
 from langchain_pinecone import PineconeVectorStore
-
+from pinecone import Pinecone as PineconeClient, ServerlessSpec
 
 load_dotenv()
 
+# Enable debug logging
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 @tool
 def web_search(query: str) -> dict[str, str]:
-    """Search Tavily for a query and return maximum 3 results.
-    
-    Args:
-        query: The search query."""
-    search_docs = DuckDuckGoSearchResults(max_results=3).invoke({"input": query})
-    formatted_search_docs = "\n\n---\n\n".join(
-        [
-            f'<Document source="{doc.metadata["source"]}" page="{doc.metadata.get("page", "")}"/>\n{doc.page_content}\n</Document>'
-            for doc in search_docs
-        ])
-    return {"web_results": formatted_search_docs}
+    """Search DuckDuckGo for a query and return maximum 3 results."""
+    try:
+        logger.info(f"Searching web for: {query}")
+        search_docs = DuckDuckGoSearchResults(max_results=3).invoke(query)
+
+        if not search_docs:
+            logger.warning("No web search results found")
+            return {"web_results": "No results found"}
+
+        formatted_search_docs = "\n\n---\n\n".join(
+            [
+                f'<Document source="{doc.metadata.get("source", "unknown")}" page="{doc.metadata.get("page", "")}"/>\n{doc.page_content}\n</Document>'
+                for doc in search_docs
+                if hasattr(doc, 'page_content')
+            ]
+        )
+        return {"web_results": formatted_search_docs if formatted_search_docs else "No valid results found"}
+    except Exception as e:
+        logger.error(f"Error in web_search: {e}")
+        return {"web_results": f"Search error: {str(e)}"}
 
 @tool
 def wikipedia_search(query: str) -> dict[str, str]:
-    """
-    Search Wikipedia for a query and returns a maximum of 2 results.
-    
-    Args:
-        query: The search query.
-    """
-    search_docs = WikipediaLoader(query=query, load_max_docs=2).load()
-    formatted_search_docs = "\n\n---\n\n".join(
-        [
-            f'<Document source="{doc.metadata["source"]}" page="{doc.metadata.get("page", "")}"/>\n{doc.page_content}\n</Document>'
-            for doc in search_docs
-        ])
-    return {"wikipedia_results": formatted_search_docs}
+    """Search Wikipedia for a query and returns a maximum of 2 results."""
+    try:
+        logger.info(f"Searching Wikipedia for: {query}")
+        search_docs = WikipediaLoader(query=query, load_max_docs=2).load()
+
+        if not search_docs:
+            logger.warning("No Wikipedia results found")
+            return {"wikipedia_results": "No Wikipedia results found"}
+
+        formatted_search_docs = "\n\n---\n\n".join(
+            [
+                f'<Document source="{doc.metadata.get("source", "unknown")}" page="{doc.metadata.get("page", "")}"/>\n{doc.page_content}\n</Document>'
+                for doc in search_docs
+            ]
+        )
+        return {"wikipedia_results": formatted_search_docs}
+    except Exception as e:
+        logger.error(f"Error in Wikipedia search: {e}")
+        return {"wikipedia_results": f"Error searching Wikipedia: {str(e)}"}
 
 @tool
 def arxiv_search(query: str) -> dict[str, str]:
-    """Search Arxiv for a query and returns a maximum of 3 results.
-    
-    Args:
-        query: The search query."""
-    search_docs = ArxivLoader(query=query, load_max_docs=3).load()
-    formatted_search_docs = "\n\n---\n\n".join(
-        [
-            f'<Document source="{doc.metadata["source"]}" page="{doc.metadata.get("page", "")}"/>\n{doc.page_content[:1000]}\n</Document>'
-            for doc in search_docs
-        ])
-    return {"arxiv_results": formatted_search_docs}
+    """Search Arxiv for a query and returns a maximum of 3 results."""
+    try:
+        logger.info(f"Searching Arxiv for: {query}")
+        search_docs = ArxivLoader(query=query, load_max_docs=3).load()
 
-# --- Load System Prompt ---
-# This is the system prompt that will be used by the agent.
-with open("system_prompt.txt", "r", encoding="utf-8") as file:
-    system_prompt = file.read()
+        if not search_docs:
+            logger.warning("No Arxiv results found")
+            return {"arxiv_results": "No Arxiv results found"}
+
+        formatted_search_docs = "\n\n---\n\n".join(
+            [
+                f'<Document source="{doc.metadata.get("source", "unknown")}" page="{doc.metadata.get("page", "")}"/>\n{doc.page_content[:1000]}\n</Document>'
+                for doc in search_docs
+            ]
+        )
+        return {"arxiv_results": formatted_search_docs}
+    except Exception as e:
+        logger.error(f"Error in Arxiv search: {e}")
+        return {"arxiv_results": f"Error searching Arxiv: {str(e)}"}
+
+# Load system prompt
+try:
+    with open("system_prompt.txt", "r", encoding="utf-8") as file:
+        system_prompt = file.read()
+    logger.info("Successfully loaded system prompt")
+except Exception as e:
+    logger.error(f"Error loading system prompt: {e}")
+    system_prompt = "You are a helpful assistant."
 
 system_message = SystemMessage(content=system_prompt)
 
-# Initialize HuggingFace embeddings
+# Initialize embeddings
 hf_embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2")
+logger.info("Initialized HuggingFace embeddings")
 
 # Initialize Pinecone
-pinecone_api_key = os.environ.get("PINECONE_API_KEY")
-if not pinecone_api_key:
-    raise ValueError("PINECONE_API_KEY environment variable must be set.")
-
-from pinecone import Pinecone, ServerlessSpec
-
-# Create a Pinecone client instance
-pc = Pinecone(api_key=pinecone_api_key)
-
-# Now create or connect to your index
-index_name = "documents"
-index_dimension = 768  # Dimension for 'all-mpnet-base-v2' embeddings
-
 try:
-    # Check if index exists
+    pinecone_api_key = os.environ.get("PINECONE_API_KEY")
+    if not pinecone_api_key:
+        raise ValueError("PINECONE_API_KEY environment variable must be set.")
+
+    pc = PineconeClient(api_key=pinecone_api_key)
+    logger.info("Initialized Pinecone client")
+
+    index_name = "documents"
+    index_dimension = 768
+
+    # Check/create index
     if index_name not in pc.list_indexes().names():
-        # Create a new index
+        logger.info(f"Creating new Pinecone index: {index_name}")
         pc.create_index(
             name=index_name,
             dimension=index_dimension,
             metric="cosine",
-            spec=ServerlessSpec(
-                cloud="aws",  # or your preferred cloud provider
-                region="us-east-1"  # or your preferred region
-            )
+            spec=ServerlessSpec(cloud="aws", region="us-east-1")
         )
+    else:
+        logger.info(f"Using existing Pinecone index: {index_name}")
 
     vector_store = PineconeVectorStore(
         index_name=index_name,
         embedding=hf_embeddings,
         pinecone_api_key=pinecone_api_key
     )
+    logger.info("Successfully initialized Pinecone vector store")
+
+    # Check if index has content
+    index_stats = pc.describe_index(index_name)
+    logger.info(f"Index stats: {index_stats}")
+
 except Exception as e:
-    raise RuntimeError(f"Failed to initialize Pinecone index: {e}")
+    logger.error(f"Failed to initialize Pinecone: {e}")
+    raise RuntimeError(f"Failed to initialize Pinecone: {e}")
 
 create_retriever_tool = create_retriever_tool(
     retriever=vector_store.as_retriever(),
@@ -112,7 +149,6 @@ create_retriever_tool = create_retriever_tool(
     description="A tool to retrieve similar questions from a vector store.",
 )
 
-# Tools
 tools = [
     web_search,
     wikipedia_search,
@@ -120,62 +156,96 @@ tools = [
     create_retriever_tool
 ]
 
-# Build graph function
-def build_graph(provider: str = "huggingface"):
-    """
-    Build the graph
-    """
-    if provider == "huggingface":
-        llm = ChatHuggingFace(
-            llm=HuggingFaceEndpoint(
-                model="Meta-DeepLearning/llama-2-7b-chat-hf",
-                temperature=0,
-            ),
-        )
-    else:
-        raise ValueError("Invalid provider. Choose 'huggingface'.")
-    
-    # Bind tools to LLM
-    llm_with_tools = llm.bind_tools(tools)
-
-    # Define the two nodes in the graph: retriever and assistant
-    def assistant(state: MessagesState):
-        """
-        Assistant node: This node will use the LLM to generate a response based on the messages in the state.
-        It will also use the tools if the condition is met.
-        """
-        return {"messages": [llm_with_tools.invoke(state["messages"])]}
-    
-    def retriever(state: MessagesState):
-        """
-        Retriever node: This node will use the vector store to find similar questions based on the first message in the state.
-        It will return the similar question as an example message.
-        """
-        message_content = state["messages"][0].content
-        if isinstance(message_content, str):
-            query = message_content
-        elif isinstance(message_content, list) and message_content and isinstance(message_content[0], str):
-            query = message_content[0]
+def build_graph(provider: str = "groq"):
+    """Build the graph"""
+    try:
+        if provider == "groq":
+            llm = ChatGroq(model="qwen/qwen3-32b", temperature=0)
         else:
-            raise ValueError("Message content must be a string for similarity_search.")
-        similar_question = vector_store.similarity_search(query)
-        example_msg = HumanMessage(
-            content=f"Here I provide a similar question and answer for reference: \n\n{similar_question[0].page_content}",
-        )
-        return {"messages": [system_message] + state["messages"] + [example_msg]}
+            raise ValueError("Invalid provider. Choose 'groq'.")
 
+        llm_with_tools = llm.bind_tools(tools)
+        logger.info("Successfully bound tools to LLM")
 
-    graph_builder = StateGraph(MessagesState)
-    graph_builder.add_node("retriever", retriever)
-    graph_builder.add_node("assistant", assistant)
-    graph_builder.add_node("tools", ToolNode(tools))
-    graph_builder.add_edge(START, "retriever")
-    graph_builder.add_edge("retriever", "assistant")
-    graph_builder.add_conditional_edges(
-        "assistant",
-        tools_condition,
-    )
-    graph_builder.add_edge("tools", "assistant")
+        def assistant(state: MessagesState):
+            """Assistant node"""
+            try:
+                logger.info("Assistant node invoked")
+                response = llm_with_tools.invoke(state["messages"])
+                return {"messages": [response]}
+            except Exception as e:
+                logger.error(f"Error in assistant node: {e}")
+                return {"messages": [HumanMessage(content=f"Error: {str(e)}")]}
 
-    # Compile graph
-    return graph_builder.compile()
+        def retriever(state: MessagesState):
+            """Retriever node"""
+            try:
+                logger.info("Retriever node invoked")
+                if not state["messages"]:
+                    logger.warning("No messages in state for retriever")
+                    return {"messages": [system_message]}
+
+                message_content = state["messages"][0].content
+                if isinstance(message_content, str):
+                    query = message_content
+                else:
+                    logger.warning(f"Unexpected message content type: {type(message_content)}")
+                    return {"messages": [system_message] + state["messages"]}
+
+                logger.info(f"Performing similarity search for query: {query[:50]}...")
+                similar_questions = vector_store.similarity_search(query, k=1)
+
+                if not similar_questions:
+                    logger.warning("No similar questions found")
+                    return {"messages": [system_message] + state["messages"]}
+
+                similar_question = similar_questions[0]
+                example_msg = HumanMessage(
+                    content=f"Similar question reference: \n\n{similar_question.page_content[:200]}...",
+                )
+                return {"messages": [system_message] + state["messages"] + [example_msg]}
+            except Exception as e:
+                logger.error(f"Error in retriever node: {e}")
+                return {"messages": [system_message] + state["messages"]}
+
+        builder = StateGraph(MessagesState)
+        builder.add_node("retriever", retriever)
+        builder.add_node("assistant", assistant)
+        builder.add_node("tools", ToolNode(tools))
+        builder.add_edge(START, "retriever")
+        builder.add_edge("retriever", "assistant")
+        builder.add_conditional_edges("assistant", tools_condition)
+        builder.add_edge("tools", "assistant")
+
+        logger.info("Successfully built graph")
+        return builder.compile()
+    except Exception as e:
+        logger.error(f"Error building graph: {e}")
+        raise
+
+# Test case
+if __name__ == "__main__":
+    try:
+        logger.info("Starting test case...")
+        question = "When was a picture of St. Thomas Aquinas first added to the Wikipedia page on the Principle of double effect?"
+
+        # Build the graph
+        graph = build_graph(provider="groq")
+        logger.info("Graph built successfully")
+
+        # Run the graph
+        logger.info(f"Asking question: {question}")
+        messages = [HumanMessage(content=question)]
+        result = graph.invoke({"messages": messages})
+
+        logger.info("Response received:")
+        for message in result["messages"]:
+            if isinstance(message, HumanMessage):
+                logger.info(f"Human: {message.content}")
+            elif isinstance(message, SystemMessage):
+                logger.info(f"System: {message.content}")
+            else:
+                logger.info(f"Message: {message.content}")
+
+    except Exception as e:
+        logger.error(f"Error during test execution: {e}")
