@@ -3,21 +3,30 @@ import gradio as gr
 import requests
 import inspect
 import pandas as pd
+from agent import build_graph
+from langchain_core.messages import HumanMessage, SystemMessage
 
-# (Keep Constants as is)
-# --- Constants ---
 DEFAULT_API_URL = "https://agents-course-unit4-scoring.hf.space"
 
-# --- Basic Agent Definition ---
-# ----- THIS IS WERE YOU CAN BUILD WHAT YOU WANT ------
-class BasicAgent:
+class LangChainAgent:
+    """"
+    A simple LangChain agent that uses a graph to process questions and return answers.
+    This agent uses a retriever tool to find similar questions and an assistant tool to generate answers.
+    """
     def __init__(self):
-        print("BasicAgent initialized.")
+        print("LangChainAgent initialized.")
+        self.graph = build_graph()
+
     def __call__(self, question: str) -> str:
         print(f"Agent received question (first 50 chars): {question[:50]}...")
-        fixed_answer = "This is a default answer."
-        print(f"Agent returning fixed answer: {fixed_answer}")
-        return fixed_answer
+        
+        # Logic to process the question and return an answer
+        messages = [HumanMessage(content=question)]
+        messages = self.graph.invoke({"messages": messages})
+        prefixed_answer = messages["messages"][-1].content
+        final_answer = prefixed_answer.split("FINAL ANSWER: ")[-1].strip()
+
+        return final_answer
 
 def run_and_submit_all( profile: gr.OAuthProfile | None):
     """
@@ -40,7 +49,7 @@ def run_and_submit_all( profile: gr.OAuthProfile | None):
 
     # 1. Instantiate Agent ( modify this part to create your agent)
     try:
-        agent = BasicAgent()
+        agent = LangChainAgent()
     except Exception as e:
         print(f"Error instantiating agent: {e}")
         return f"Error initializing agent: {e}", None
@@ -61,10 +70,6 @@ def run_and_submit_all( profile: gr.OAuthProfile | None):
     except requests.exceptions.RequestException as e:
         print(f"Error fetching questions: {e}")
         return f"Error fetching questions: {e}", None
-    except requests.exceptions.JSONDecodeError as e:
-         print(f"Error decoding JSON response from questions endpoint: {e}")
-         print(f"Response text: {response.text[:500]}")
-         return f"Error decoding server response for questions: {e}", None
     except Exception as e:
         print(f"An unexpected error occurred fetching questions: {e}")
         return f"An unexpected error occurred fetching questions: {e}", None
