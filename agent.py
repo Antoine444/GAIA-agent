@@ -23,6 +23,57 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 @tool
+def multiply(a: int, b: int) -> int:
+    """Multiply two numbers.
+    Args:
+        a: first int
+        b: second int
+    """
+    return a * b
+
+@tool
+def add(a: int, b: int) -> int:
+    """Add two numbers.
+    
+    Args:
+        a: first int
+        b: second int
+    """
+    return a + b
+
+@tool
+def subtract(a: int, b: int) -> int:
+    """Subtract two numbers.
+    
+    Args:
+        a: first int
+        b: second int
+    """
+    return a - b
+
+@tool
+def divide(a: int, b: int) -> int:
+    """Divide two numbers.
+    
+    Args:
+        a: first int
+        b: second int
+    """
+    if b == 0:
+        raise ValueError("Cannot divide by zero.")
+    return a / b
+
+@tool
+def modulus(a: int, b: int) -> int:
+    """Get the modulus of two numbers.
+    
+    Args:
+        a: first int
+        b: second int
+    """
+    return a % b
+
+@tool
 def web_search(query: str) -> dict[str, str]:
     """Search DuckDuckGo for a query and return maximum 3 results."""
     try:
@@ -153,7 +204,11 @@ tools = [
     web_search,
     wikipedia_search,
     arxiv_search,
-    create_retriever_tool
+    add,
+    subtract,
+    multiply,
+    divide,
+    modulus
 ]
 
 def build_graph(provider: str = "groq"):
