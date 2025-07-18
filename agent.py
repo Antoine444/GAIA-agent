@@ -3,8 +3,6 @@ from dotenv import load_dotenv
 from langgraph.graph import START, StateGraph, MessagesState
 from langgraph.prebuilt import tools_condition
 from langgraph.prebuilt import ToolNode
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_groq import ChatGroq
 from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint, HuggingFaceEmbeddings
 from langchain_community.tools.ddg_search.tool import DuckDuckGoSearchResults
 from langchain_community.document_loaders import WikipediaLoader
