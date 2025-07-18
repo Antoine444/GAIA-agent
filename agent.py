@@ -3,9 +3,10 @@ from dotenv import load_dotenv
 from langgraph.graph import START, StateGraph, MessagesState
 from langgraph.prebuilt import tools_condition
 from langgraph.prebuilt import ToolNode
-from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint, HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_groq import ChatGroq
 from langchain_community.tools.ddg_search.tool import DuckDuckGoSearchResults
+from langchain_community.tools.tavily_search.tool import TavilySearchResults
 from langchain_community.document_loaders import WikipediaLoader
 from langchain_community.document_loaders import ArxivLoader
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -78,7 +79,7 @@ def web_search(query: str) -> dict[str, str]:
     """Search DuckDuckGo for a query and return maximum 3 results."""
     logger.info(f"Searching DuckDuckGo for: {query}")
 
-    search_docs = DuckDuckGoSearchResults(max_results=3).invoke(query=query)
+    search_docs = TavilySearchResults(max_results=3).invoke(query=query)
 
     formatted_search_docs = "\n\n---\n\n".join(
         [
