@@ -116,7 +116,8 @@ create_retriever_tool = create_retriever_tool(
 tools = [
     web_search,
     wikipedia_search,
-    arxiv_search
+    arxiv_search,
+    create_retriever_tool
 ]
 
 # Build graph function
