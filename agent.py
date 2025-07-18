@@ -76,78 +76,51 @@ def modulus(a: int, b: int) -> int:
 @tool
 def web_search(query: str) -> dict[str, str]:
     """Search DuckDuckGo for a query and return maximum 3 results."""
-    try:
-        logger.info(f"Searching web for: {query}")
-        search_docs = DuckDuckGoSearchResults(max_results=3).invoke(query)
+    logger.info(f"Searching DuckDuckGo for: {query}")
 
-        if not search_docs:
-            logger.warning("No web search results found")
-            return {"web_results": "No results found"}
+    search_docs = DuckDuckGoSearchResults(max_results=3).invoke(query=query)
 
-        formatted_search_docs = "\n\n---\n\n".join(
-            [
-                f'<Document source="{doc.metadata.get("source", "unknown")}" page="{doc.metadata.get("page", "")}"/>\n{doc.page_content}\n</Document>'
-                for doc in search_docs
-                if hasattr(doc, 'page_content')
-            ]
-        )
-        return {"web_results": formatted_search_docs if formatted_search_docs else "No valid results found"}
-    except Exception as e:
-        logger.error(f"Error in web_search: {e}")
-        return {"web_results": f"Search error: {str(e)}"}
+    formatted_search_docs = "\n\n---\n\n".join(
+        [
+            f'<Document source="{doc.metadata.get("source", "unknown")}" page="{doc.metadata.get("page", "")}"/>\n{doc.page_content}\n</Document>'
+            for doc in search_docs
+        ]
+    )
+    return {"web_results": formatted_search_docs}
 
 @tool
 def wikipedia_search(query: str) -> dict[str, str]:
     """Search Wikipedia for a query and returns a maximum of 2 results."""
-    try:
-        logger.info(f"Searching Wikipedia for: {query}")
-        search_docs = WikipediaLoader(query=query, load_max_docs=2).load()
+    logger.info(f"Searching Wikipedia for: {query}")
 
-        if not search_docs:
-            logger.warning("No Wikipedia results found")
-            return {"wikipedia_results": "No Wikipedia results found"}
-
-        formatted_search_docs = "\n\n---\n\n".join(
-            [
-                f'<Document source="{doc.metadata.get("source", "unknown")}" page="{doc.metadata.get("page", "")}"/>\n{doc.page_content}\n</Document>'
-                for doc in search_docs
-            ]
-        )
-        return {"wikipedia_results": formatted_search_docs}
-    except Exception as e:
-        logger.error(f"Error in Wikipedia search: {e}")
-        return {"wikipedia_results": f"Error searching Wikipedia: {str(e)}"}
+    search_docs = WikipediaLoader(query=query, load_max_docs=2).load()
+    formatted_search_docs = "\n\n---\n\n".join(
+        [
+            f'<Document source="{doc.metadata.get("source", "unknown")}" page="{doc.metadata.get("page", "")}"/>\n{doc.page_content}\n</Document>'
+            for doc in search_docs
+        ]
+    )
+    return {"wikipedia_results": formatted_search_docs}
 
 @tool
 def arxiv_search(query: str) -> dict[str, str]:
     """Search Arxiv for a query and returns a maximum of 3 results."""
-    try:
-        logger.info(f"Searching Arxiv for: {query}")
-        search_docs = ArxivLoader(query=query, load_max_docs=3).load()
+    logger.info(f"Searching Arxiv for: {query}")
 
-        if not search_docs:
-            logger.warning("No Arxiv results found")
-            return {"arxiv_results": "No Arxiv results found"}
+    search_docs = ArxivLoader(query=query, load_max_docs=3).load()
 
-        formatted_search_docs = "\n\n---\n\n".join(
-            [
-                f'<Document source="{doc.metadata.get("source", "unknown")}" page="{doc.metadata.get("page", "")}"/>\n{doc.page_content[:1000]}\n</Document>'
-                for doc in search_docs
-            ]
-        )
-        return {"arxiv_results": formatted_search_docs}
-    except Exception as e:
-        logger.error(f"Error in Arxiv search: {e}")
-        return {"arxiv_results": f"Error searching Arxiv: {str(e)}"}
+    formatted_search_docs = "\n\n---\n\n".join(
+        [
+            f'<Document source="{doc.metadata.get("source", "unknown")}" page="{doc.metadata.get("page", "")}"/>\n{doc.page_content[:1000]}\n</Document>'
+            for doc in search_docs
+        ]
+    )
+    return {"arxiv_results": formatted_search_docs}
+
 
 # Load system prompt
-try:
-    with open("system_prompt.txt", "r", encoding="utf-8") as file:
-        system_prompt = file.read()
-    logger.info("Successfully loaded system prompt")
-except Exception as e:
-    logger.error(f"Error loading system prompt: {e}")
-    system_prompt = "You are a helpful assistant."
+with open("system_prompt.txt", "r") as f:
+    system_prompt = f.read()
 
 system_message = SystemMessage(content=system_prompt)
 
@@ -248,17 +221,17 @@ def build_graph(provider: str = "groq"):
                     return {"messages": [system_message] + state["messages"]}
 
                 logger.info(f"Performing similarity search for query: {query[:50]}...")
-                similar_questions = vector_store.similarity_search(query, k=1)
+                similar_questions = vector_store.similarity_search(query)
 
                 if not similar_questions:
                     logger.warning("No similar questions found")
                     return {"messages": [system_message] + state["messages"]}
 
                 similar_question = similar_questions[0]
-                example_msg = HumanMessage(
-                    content=f"Similar question reference: \n\n{similar_question.page_content[:200]}...",
+                example_message = HumanMessage(
+                    content=f"Similar question and answer for reference: \n\n{similar_question.page_content}",
                 )
-                return {"messages": [system_message] + state["messages"] + [example_msg]}
+                return {"messages": [system_message] + state["messages"] + [example_message]}
             except Exception as e:
                 logger.error(f"Error in retriever node: {e}")
                 return {"messages": [system_message] + state["messages"]}
