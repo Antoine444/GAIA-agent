@@ -3,7 +3,7 @@ import gradio as gr
 import requests
 import pandas as pd
 from agent import build_graph
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 
 DEFAULT_API_URL = "https://agents-course-unit4-scoring.hf.space"
 

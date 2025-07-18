@@ -10,7 +10,7 @@ from langchain_community.document_loaders import ArxivLoader
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.tools import tool
 from langchain.tools.retriever import create_retriever_tool
-from langchain.vectorstores import Pinecone
+from langchain_community.vectorstores import Pinecone
 import pinecone
 
 
