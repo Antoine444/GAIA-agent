@@ -72,24 +72,32 @@ hf_embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpne
 
 # Initialize Pinecone
 pinecone_api_key = os.environ.get("PINECONE_API_KEY")
-pinecone_environment = os.environ.get("PINECONE_ENVIRONMENT")
-if not pinecone_api_key or not pinecone_environment:
-    raise ValueError("PINECONE_API_KEY and PINECONE_ENVIRONMENT environment variables must be set.")
+if not pinecone_api_key:
+    raise ValueError("PINECONE_API_KEY environment variable must be set.")
 
-pinecone.init(api_key=pinecone_api_key, environment=pinecone_environment)
+from pinecone import Pinecone, ServerlessSpec
 
-# Create or connect to Pinecone index
+# Create a Pinecone client instance
+pc = Pinecone(api_key=pinecone_api_key)
+
+# Now create or connect to your index
 index_name = "documents"
 index_dimension = 768  # Dimension for 'all-mpnet-base-v2' embeddings
 
 try:
-    if index_name not in pinecone.list_indexes():
-        pinecone.create_index(
-            index_name,
+    # Check if index exists
+    if index_name not in pc.list_indexes().names():
+        # Create a new index
+        pc.create_index(
+            name=index_name,
             dimension=index_dimension,
-            metric="cosine"  # or 'euclidean', 'dotproduct'
+            metric="cosine",
+            spec=ServerlessSpec(
+                cloud="aws",  # or your preferred cloud provider
+                region="us-west-2"  # or your preferred region
+            )
         )
-    # Initialize Pinecone vector store
+
     vector_store = Pinecone.from_existing_index(index_name, hf_embeddings)
 except Exception as e:
     raise RuntimeError(f"Failed to initialize Pinecone index: {e}")
