@@ -94,7 +94,7 @@ try:
             metric="cosine",
             spec=ServerlessSpec(
                 cloud="aws",  # or your preferred cloud provider
-                region="us-west-2"  # or your preferred region
+                region="us-east-1"  # or your preferred region
             )
         )
 
