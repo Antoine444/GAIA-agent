@@ -3,14 +3,12 @@ requests
 langchain
 langchain-community
 langchain-core
-langchain-google-genai
 langchain-huggingface
 langchain-groq
-langchain-pinecone
 langgraph
 huggingface_hub
 sentence-transformers
-pinecone
+supabase
 pymupdf
 wikipedia
 pgvector
