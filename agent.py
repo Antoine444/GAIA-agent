@@ -6,15 +6,13 @@ from langgraph.prebuilt import ToolNode
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_groq import ChatGroq
 from langchain_community.tools.ddg_search.tool import DuckDuckGoSearchResults
-from langchain_community.tools.tavily_search.tool import TavilySearchResults
 from langchain_community.document_loaders import WikipediaLoader
 from langchain_community.document_loaders import ArxivLoader
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.tools import tool
 from langchain.tools.retriever import create_retriever_tool
-from langchain_community.vectorstores import Pinecone
-from langchain_pinecone import PineconeVectorStore
-from pinecone import Pinecone as PineconeClient, ServerlessSpec
+from supabase import create_client, Client
+from langchain_community.vectorstores import SupabaseVectorStore
 
 load_dotenv()
 
@@ -79,7 +77,7 @@ def web_search(query: str) -> dict[str, str]:
     """Search DuckDuckGo for a query and return maximum 3 results."""
     logger.info(f"Searching DuckDuckGo for: {query}")
 
-    search_docs = TavilySearchResults(max_results=3).invoke(query=query)
+    search_docs = DuckDuckGoSearchResults(max_results=3).invoke(query=query)
 
     formatted_search_docs = "\n\n---\n\n".join(
         [
@@ -127,47 +125,16 @@ system_message = SystemMessage(content=system_prompt)
 
 # Initialize embeddings
 hf_embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2")
-logger.info("Initialized HuggingFace embeddings")
 
-# Initialize Pinecone
-try:
-    pinecone_api_key = os.environ.get("PINECONE_API_KEY")
-    if not pinecone_api_key:
-        raise ValueError("PINECONE_API_KEY environment variable must be set.")
-
-    pc = PineconeClient(api_key=pinecone_api_key)
-    logger.info("Initialized Pinecone client")
-
-    index_name = "documents"
-    index_dimension = 768
-
-    # Check/create index
-    if index_name not in pc.list_indexes().names():
-        logger.info(f"Creating new Pinecone index: {index_name}")
-        pc.create_index(
-            name=index_name,
-            dimension=index_dimension,
-            metric="cosine",
-            spec=ServerlessSpec(cloud="aws", region="us-east-1")
-        )
-    else:
-        logger.info(f"Using existing Pinecone index: {index_name}")
-
-    vector_store = PineconeVectorStore(
-        index_name=index_name,
-        embedding=hf_embeddings,
-        pinecone_api_key=pinecone_api_key
-    )
-    logger.info("Successfully initialized Pinecone vector store")
-
-    # Check if index has content
-    index_stats = pc.describe_index(index_name)
-    logger.info(f"Index stats: {index_stats}")
-
-except Exception as e:
-    logger.error(f"Failed to initialize Pinecone: {e}")
-    raise RuntimeError(f"Failed to initialize Pinecone: {e}")
-
+supabase: Client = create_client(
+    os.environ.get("SUPABASE_URL"), 
+    os.environ.get("SUPABASE_SERVICE_KEY"))
+vector_store = SupabaseVectorStore(
+    client=supabase,
+    embedding=hf_embeddings,
+    table_name="documents",
+    query_name="match_documents_langchain",
+)
 create_retriever_tool = create_retriever_tool(
     retriever=vector_store.as_retriever(),
     name="Question Search",
@@ -187,70 +154,47 @@ tools = [
 
 def build_graph(provider: str = "groq"):
     """Build the graph"""
-    try:
-        if provider == "groq":
-            llm = ChatGroq(model="qwen/qwen3-32b", temperature=0)
+    if provider == "groq":
+        llm = ChatGroq(
+            model="qwen/qwen3-32b",
+            temperature=0.0
+        )
+    else:
+        raise ValueError(f"Unsupported provider: {provider}")
+    
+    llm_with_tools = llm.bind_tools(tools)
+
+    # Nodes
+    def assistant(state: MessagesState):
+        """Assistant node"""
+        return {"messages": [llm_with_tools.invoke(state["messages"])]}
+
+    def retriever(state: MessagesState):
+        """Retriever node"""
+        similar_question = vector_store.similarity_search(state["messages"][0].content)
+
+        if similar_question:  # Check if the list is not empty
+            example_msg = HumanMessage(
+                content=f"Here I provide a similar question and answer for reference: \n\n{similar_question[0].page_content}",
+            )
+            return {"messages": [system_message] + state["messages"] + [example_msg]}
         else:
-            raise ValueError("Invalid provider. Choose 'groq'.")
+            # Handle the case when no similar questions are found
+            return {"messages": [system_message] + state["messages"]}
 
-        llm_with_tools = llm.bind_tools(tools)
-        logger.info("Successfully bound tools to LLM")
+    builder = StateGraph(MessagesState)
+    builder.add_node("retriever", retriever)
+    builder.add_node("assistant", assistant)
+    builder.add_node("tools", ToolNode(tools))
+    builder.add_edge(START, "retriever")
+    builder.add_edge("retriever", "assistant")
+    builder.add_conditional_edges("assistant", tools_condition)
+    builder.add_edge("tools", "assistant")
 
-        def assistant(state: MessagesState):
-            """Assistant node"""
-            try:
-                logger.info("Assistant node invoked")
-                response = llm_with_tools.invoke(state["messages"])
-                return {"messages": [response]}
-            except Exception as e:
-                logger.error(f"Error in assistant node: {e}")
-                return {"messages": [HumanMessage(content=f"Error: {str(e)}")]}
+    logger.info("Successfully built graph")
 
-        def retriever(state: MessagesState):
-            """Retriever node"""
-            try:
-                logger.info("Retriever node invoked")
-                if not state["messages"]:
-                    logger.warning("No messages in state for retriever")
-                    return {"messages": [system_message]}
+    return builder.compile()
 
-                message_content = state["messages"][0].content
-                if isinstance(message_content, str):
-                    query = message_content
-                else:
-                    logger.warning(f"Unexpected message content type: {type(message_content)}")
-                    return {"messages": [system_message] + state["messages"]}
-
-                logger.info(f"Performing similarity search for query: {query[:50]}...")
-                similar_questions = vector_store.similarity_search(query)
-
-                if not similar_questions:
-                    logger.warning("No similar questions found")
-                    return {"messages": [system_message] + state["messages"]}
-
-                similar_question = similar_questions[0]
-                example_message = HumanMessage(
-                    content=f"Similar question and answer for reference: \n\n{similar_question.page_content}",
-                )
-                return {"messages": [system_message] + state["messages"] + [example_message]}
-            except Exception as e:
-                logger.error(f"Error in retriever node: {e}")
-                return {"messages": [system_message] + state["messages"]}
-
-        builder = StateGraph(MessagesState)
-        builder.add_node("retriever", retriever)
-        builder.add_node("assistant", assistant)
-        builder.add_node("tools", ToolNode(tools))
-        builder.add_edge(START, "retriever")
-        builder.add_edge("retriever", "assistant")
-        builder.add_conditional_edges("assistant", tools_condition)
-        builder.add_edge("tools", "assistant")
-
-        logger.info("Successfully built graph")
-        return builder.compile()
-    except Exception as e:
-        logger.error(f"Error building graph: {e}")
-        raise
 
 # Test case
 if __name__ == "__main__":
