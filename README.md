@@ -50,4 +50,4 @@ cd agent-GAIA
 pip install -r requirements.txt
 ```
 
-You will also need to create API keys for the Supabase and Groq provider.
+You will also need to create API keys for Supabase and for Groq provider.
