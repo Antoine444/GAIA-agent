@@ -1,5 +1,11 @@
 import os
+import cmath
 from dotenv import load_dotenv
+from typing import Optional
+import tempfile
+import uuid
+import requests
+from urllib.parse import urlparse
 from langgraph.graph import START, StateGraph, MessagesState
 from langgraph.prebuilt import tools_condition
 from langgraph.prebuilt import ToolNode
@@ -13,6 +19,8 @@ from langchain_core.tools import tool
 from langchain.tools.retriever import create_retriever_tool
 from supabase import create_client, Client
 from langchain_community.vectorstores import SupabaseVectorStore
+import pytesseract
+from PIL import Image
 
 load_dotenv()
 
@@ -73,6 +81,28 @@ def modulus(a: int, b: int) -> int:
     return a % b
 
 @tool
+def power(a: float, b: float) -> float:
+    """
+    Get the power of two numbers.
+    Args:
+        a (float): the first number
+        b (float): the second number
+    """
+    return a**b
+
+
+@tool
+def square_root(a: float) -> float | complex:
+    """
+    Get the square root of a number.
+    Args:
+        a (float): the number to get the square root of
+    """
+    if a >= 0:
+        return a**0.5
+    return cmath.sqrt(a)
+
+@tool
 def web_search(query: str) -> dict[str, str]:
     """Search DuckDuckGo for a query and return maximum 3 results."""
     logger.info(f"Searching DuckDuckGo for: {query}")
@@ -116,6 +146,79 @@ def arxiv_search(query: str) -> dict[str, str]:
     )
     return {"arxiv_results": formatted_search_docs}
 
+@tool
+def save_and_read_file(content: str, filename: Optional[str] = None) -> str:
+    """
+    Save content to a file and return the path.
+    Args:
+        content (str): the content to save to the file
+        filename (str, optional): the name of the file. If not provided, a random name file will be created.
+    """
+    temp_dir = tempfile.gettempdir()
+    if filename is None:
+        temp_file = tempfile.NamedTemporaryFile(delete=False, dir=temp_dir)
+        filepath = temp_file.name
+    else:
+        filepath = os.path.join(temp_dir, filename)
+
+    with open(filepath, "w") as f:
+        f.write(content)
+
+    return f"File saved to {filepath}. You can read this file to process its contents."
+
+
+@tool
+def download_file_from_url(url: str, filename: Optional[str] = None) -> str:
+    """
+    Download a file from a URL and save it to a temporary location.
+    Args:
+        url (str): the URL of the file to download.
+        filename (str, optional): the name of the file. If not provided, a random name file will be created.
+    """
+    try:
+        # Parse URL to get filename if not provided
+        if not filename:
+            path = urlparse(url).path
+            filename = os.path.basename(path)
+            if not filename:
+                filename = f"downloaded_{uuid.uuid4().hex[:8]}"
+
+        # Create temporary file
+        temp_dir = tempfile.gettempdir()
+        filepath = os.path.join(temp_dir, filename)
+
+        # Download the file
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+
+        # Save the file
+        with open(filepath, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        return f"File downloaded to {filepath}. You can read this file to process its contents."
+    except Exception as e:
+        return f"Error downloading file: {str(e)}"
+
+
+@tool
+def extract_text_from_image(image_path: str) -> str:
+    """
+    Extract text from an image using OCR library pytesseract (if available).
+    Args:
+        image_path (str): the path to the image file.
+    """
+    try:
+        # Open the image
+        image = Image.open(image_path)
+
+        # Extract text from the image
+        text = pytesseract.image_to_string(image)
+
+        return f"Extracted text from image:\n\n{text}"
+    except Exception as e:
+        return f"Error extracting text from image: {str(e)}"
+
 
 # Load system prompt
 with open("system_prompt.txt", "r") as f:
@@ -126,6 +229,7 @@ system_message = SystemMessage(content=system_prompt)
 # Initialize embeddings
 hf_embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2")
 
+# Initialize vector store
 supabase: Client = create_client(
     os.environ.get("SUPABASE_URL"), 
     os.environ.get("SUPABASE_SERVICE_KEY"))
@@ -149,7 +253,12 @@ tools = [
     subtract,
     multiply,
     divide,
-    modulus
+    modulus,
+    power,
+    square_root,
+    save_and_read_file,
+    download_file_from_url,
+    extract_text_from_image
 ]
 
 def build_graph(provider: str = "groq"):
